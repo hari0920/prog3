@@ -309,8 +309,8 @@ function loadModels() {
                     for (var longAngle=0; longAngle<2*Math.PI; longAngle+=angleIncr) // for each long
                         {
                             ellipsoidVertices.push(latRadius*Math.sin(longAngle),latY,latRadius*Math.cos(longAngle));
-                            ellipsoidUV.push((1 - (longNum / numLongSteps)), (1 - (latNum / numLongSteps)));
-                            //ellipsoidUV.push(0.5,0,5);
+                            //ellipsoidUV.push((1 - (longNum / numLongSteps)), (1 - (latNum / numLongSteps)));
+                            ellipsoidUV.push(0.5,0.5,10);
                             longNum++;
                         }
                         latNum++;
