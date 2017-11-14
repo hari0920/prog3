@@ -116,6 +116,7 @@ function handleKeyDown(event) {
     handleKeyDown.modelOn = handleKeyDown.modelOn == undefined ? null : handleKeyDown.modelOn; // nothing selected initially
 
     switch (event.code) {
+        //Texture Blending
         
         // model selection
         case "Space": 
@@ -281,7 +282,7 @@ function loadModels() {
 
     // make an ellipsoid, with numLongSteps longitudes.
     // start with a sphere of radius 1 at origin
-    // Returns verts, tris and normals.
+    // Returns verts, tris and normals and uvs
     function makeEllipsoid(currEllipsoid,numLongSteps) {
 
         try {
@@ -295,27 +296,31 @@ function loadModels() {
                 
                 // make vertices
                 var ellipsoidVertices = [0,-1,0]; // vertices to return, init to south pole
-                //add uv coordinates
-                var ellipsoidUV = [];
+                
                 var angleIncr = (Math.PI+Math.PI) / numLongSteps; // angular increment 
                 var latLimitAngle = angleIncr * (Math.floor(numLongSteps/4)-1); // start/end lat angle
                 var latRadius, latY; // radius and Y at current latitude
-                var latNum=0.0;
-                var longNum=0.0;
+                
                 for (var latAngle=-latLimitAngle; latAngle<=latLimitAngle; latAngle+=angleIncr) 
                 {   
+                    //console.log(latAngle);
                     latRadius = Math.cos(latAngle); // radius of current latitude
                     latY = Math.sin(latAngle); // height at current latitude
-                    for (var longAngle=0; longAngle<2*Math.PI; longAngle+=angleIncr) // for each long
-                        {
+                   // console.log("Starting");
+                    for (var longAngle=0; longAngle<=2*Math.PI+angleIncr; longAngle+=angleIncr) // for each long
+                        {   
+                            
+                       //     console.log(longAngle);
                             ellipsoidVertices.push(latRadius*Math.sin(longAngle),latY,latRadius*Math.cos(longAngle));
-                            //ellipsoidUV.push((1 - (longNum / numLongSteps)), (1 - (latNum / numLongSteps)));
-                            ellipsoidUV.push(0.5,0.5,10);
-                            longNum++;
+                            
                         }
-                        latNum++;
+                     //   console.log("Ending");
+                        //latNum++;
                 } // end for each latitude
+
                 ellipsoidVertices.push(0,1,0); // add north pole
+                //ellipsoidUV.push(0, 0);
+                //ellipsoidUV.push(0, 0);
                 ellipsoidVertices = ellipsoidVertices.map(function(val,idx) { // position and scale ellipsoid
                     switch (idx % 3) {
                         case 0: // x
@@ -326,7 +331,8 @@ function loadModels() {
                             return(val*currEllipsoid.c+currEllipsoid.z);
                     } // end switch
                 }); 
-
+                
+                
                 // make normals using the ellipsoid gradient equation
                 // resulting normals are unnormalized: we rely on shaders to normalize
                 var ellipsoidNormals = ellipsoidVertices.slice(); // start with a copy of the transformed verts
@@ -340,6 +346,15 @@ function loadModels() {
                             return(2/(currEllipsoid.c*currEllipsoid.c) * (val-currEllipsoid.z));
                     } // end switch
                 }); 
+                //uv generation
+                //add uv coordinates
+                var ellipsoidUV = [0,0];
+                var latNum = 0.0;
+                var longNum = 0.0;
+                for (latNum = 0.0; latNum <= numLongSteps; latNum++) {
+                    for (longNum = 0.0; longNum <= numLongSteps; longNum++)
+                        ellipsoidUV.push(((longNum / numLongSteps)), ( (latNum*2/ numLongSteps)));
+                }
                 
                 
                 // make triangles, from south pole to middle latitudes to north pole
@@ -593,6 +608,7 @@ function setupShaders() {
             vec3 colorOut = ambient + diffuse + specular; // no specular yet
             //vec4 FragColor = vec4(colorOut, 1.0); 
             gl_FragColor = texture2D(uSampler, vTextureCoord);
+            //gl_FragColor=vec4(colorOut,1.0)*texture2D(uSampler, vTextureCoord);
         }
     `;
     
@@ -802,7 +818,9 @@ function renderModels() {
     } // end for each ellipsoid
 } // end render model
 
-
+function isPowerOf2(value) {
+    return (value & (value - 1)) == 0;
+}
 //referred from https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Tutorial/Using_textures_in_WebGL
 function loadTexture(gl,url)
 {
@@ -823,15 +841,25 @@ function loadTexture(gl,url)
     const image = new Image();
     image.crossOrigin = "Anonymous";
     image.src = url;
-    image.onload = function () {
+    image.onload = function () 
+    {
         gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
         gl.texImage2D(gl.TEXTURE_2D, level, internalFormat,
             srcFormat, srcType, image);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 
-        if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+        if (isPowerOf2(image.width) && isPowerOf2(image.height)) 
+        {
+            //console.log("Mipmap");
             // Yes, it's a power of 2. Generate mips.
             gl.generateMipmap(gl.TEXTURE_2D);
-        } else {
+        } 
+        else 
+        {
+            //console.log("No Mipmap")
+            //console.log(url)
             // No, it's not a power of 2. Turn of mips and set
             // wrapping to clamp to edge
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -844,9 +872,7 @@ function loadTexture(gl,url)
     return tex;
 }
 
-function isPowerOf2(value) {
-    return (value & (value - 1)) == 0;
-}
+
 
 /* MAIN -- HERE is where execution begins after window load */
 
