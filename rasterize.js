@@ -11,7 +11,8 @@ var lightDiffuse = vec3.fromValues(1,1,1); // default light diffuse emission
 var lightSpecular = vec3.fromValues(1,1,1); // default light specular emission
 var lightPosition = vec3.fromValues(2,4,-0.5); // default light position
 var rotateTheta = Math.PI/50; // how much to rotate models by with each key press
-
+var lighting=0.0; //for lighting with texture
+var lightingULoc;
 /* webgl and geometry data */
 var gl = null; // the all powerful gl object. It's all here folks!
 var inputTriangles = []; // the triangle data as loaded from input files
@@ -116,8 +117,6 @@ function handleKeyDown(event) {
     handleKeyDown.modelOn = handleKeyDown.modelOn == undefined ? null : handleKeyDown.modelOn; // nothing selected initially
 
     switch (event.code) {
-        //Texture Blending
-        
         // model selection
         case "Space": 
             if (handleKeyDown.modelOn != null)
@@ -238,6 +237,14 @@ function handleKeyDown(event) {
                 vec3.set(inputEllipsoids[whichTriSet].yAxis,0,1,0);
             } // end for all ellipsoids
             break;
+        //Texture Blending
+        case "KeyB":
+            if (lighting == 1.0)
+                lighting = 0.0;
+            else
+                lighting = 1.0;
+            break;
+
     } // end switch
 } // end handleKeyDown
 
@@ -587,6 +594,9 @@ function setupShaders() {
 
         uniform sampler2D uSampler;
 
+        //blending
+        uniform float lighting;
+
         void main(void) {
         
             // ambient term
@@ -607,8 +617,15 @@ function setupShaders() {
             // combine to output color
             vec3 colorOut = ambient + diffuse + specular; // no specular yet
             //vec4 FragColor = vec4(colorOut, 1.0); 
-            gl_FragColor = texture2D(uSampler, vTextureCoord);
-            //gl_FragColor=vec4(colorOut,1.0)*texture2D(uSampler, vTextureCoord);
+            
+            if(lighting==1.0)
+            {
+                gl_FragColor=vec4(colorOut,1.0)*texture2D(uSampler, vTextureCoord);
+            }
+            else
+            {
+                gl_FragColor = texture2D(uSampler, vTextureCoord);
+            }
         }
     `;
     
@@ -659,7 +676,7 @@ function setupShaders() {
                 diffuseULoc = gl.getUniformLocation(shaderProgram, "uDiffuse"); // ptr to diffuse
                 specularULoc = gl.getUniformLocation(shaderProgram, "uSpecular"); // ptr to specular
                 shininessULoc = gl.getUniformLocation(shaderProgram, "uShininess"); // ptr to shininess
-                
+                lightingULoc=gl.getUniformLocation(shaderProgram,"lighting");
                 // pass global constants into fragment uniforms
                 gl.uniform3fv(eyePositionULoc,Eye); // pass in the eye's position
                 gl.uniform3fv(lightAmbientULoc,lightAmbient); // pass in the light's ambient emission
@@ -742,7 +759,7 @@ function renderModels() {
         gl.uniform3fv(diffuseULoc,currSet.material.diffuse); // pass in the diffuse reflectivity
         gl.uniform3fv(specularULoc,currSet.material.specular); // pass in the specular reflectivity
         gl.uniform1f(shininessULoc,currSet.material.n); // pass in the specular exponent
-        
+        gl.uniform1f(lightingULoc,lighting);
         // vertex buffer: activate and feed into vertex shader
         gl.bindBuffer(gl.ARRAY_BUFFER,vertexBuffers[whichTriSet]); // activate
         gl.vertexAttribPointer(vPosAttribLoc,3,gl.FLOAT,false,0,0); // feed
