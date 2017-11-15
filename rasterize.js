@@ -11,7 +11,7 @@ var lightDiffuse = vec3.fromValues(1,1,1); // default light diffuse emission
 var lightSpecular = vec3.fromValues(1,1,1); // default light specular emission
 var lightPosition = vec3.fromValues(2,4,-0.5); // default light position
 var rotateTheta = Math.PI/50; // how much to rotate models by with each key press
-var lighting=0.0; //for lighting with texture
+var lighting=0.0; //for lighting with texture, default just texture
 var lightingULoc;
 /* webgl and geometry data */
 var gl = null; // the all powerful gl object. It's all here folks!
@@ -31,6 +31,7 @@ var texture1;
 var textureListTri = [];
 var textureListEllipsoid = [];
 var temptex;
+var depth_model = [];
 /* shader parameter locations */
 var vPosAttribLoc; // where to put position for vertex shader
 var mMatrixULoc; // where to put model matrix for vertex shader
@@ -240,10 +241,11 @@ function handleKeyDown(event) {
             break;
         //Texture Blending
         case "KeyB":
-            if (lighting == 1.0)
-                lighting = 0.0;
+        console.log(lighting);
+            if(lighting==2.0)
+                lighting=0.0;
             else
-                lighting = 1.0;
+                lighting = lighting +1.0;
             break;
 
     } // end switch
@@ -276,6 +278,8 @@ function setupWebGL() {
        } else {
          //gl.clearColor(0.0, 0.0, 0.0, 1.0); // use black when we clear the frame buffer
          gl.clearDepth(1.0); // use max when we clear the depth buffer
+         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+         gl.enable(gl.BLEND);
          gl.enable(gl.DEPTH_TEST); // use hidden surface removal (with zbuffering)
        }
      } // end try
@@ -408,7 +412,7 @@ function loadModels() {
             var maxCorner = vec3.fromValues(Number.MIN_VALUE,Number.MIN_VALUE,Number.MIN_VALUE); // bbox corner
             var minCorner = vec3.fromValues(Number.MAX_VALUE,Number.MAX_VALUE,Number.MAX_VALUE); // other corner
             var whichTexture;
-            
+            var depth;
             // process each triangle set to load webgl vertex and triangle buffers
             numTriangleSets = inputTriangles.length; // remember how many tri sets
             for (var whichSet=0; whichSet<numTriangleSets; whichSet++) { // for each tri set
@@ -436,7 +440,9 @@ function loadModels() {
                     vec3.max(maxCorner,maxCorner,vtxToAdd); // update world bounding box corner maxima
                     vec3.min(minCorner,minCorner,vtxToAdd); // update world bounding box corner minima
                     vec3.add(inputTriangles[whichSet].center,inputTriangles[whichSet].center,vtxToAdd); // add to ctr sum
+                    depth=(vtxToAdd[2]);
                 } // end for vertices in set
+                depth_model.push([depth,whichSet,0,inputTriangles[whichSet].material.alpha]);
                 vec3.scale(inputTriangles[whichSet].center,inputTriangles[whichSet].center,1/numVerts); // avg ctr sum
 
                 //load the texture for the triangle 
@@ -503,7 +509,8 @@ function loadModels() {
 
                     // make the ellipsoid model
                     ellipsoidModel = makeEllipsoid(ellipsoid,32);
-    
+                    
+                    depth_model.push([ellipsoid.z, whichEllipsoid+numTriangleSets,1,ellipsoid.alpha]);
                     // send the ellipsoid vertex coords and normals to webGL
                     vertexBuffers.push(gl.createBuffer()); // init empty webgl ellipsoid vertex coord buffer
                     gl.bindBuffer(gl.ARRAY_BUFFER,vertexBuffers[vertexBuffers.length-1]); // activate that buffer
@@ -621,12 +628,20 @@ function setupShaders() {
             
             if(lighting==1.0)
             {
-                gl_FragColor=vec4(colorOut,alpha)*texture2D(uSampler, vTextureCoord);
+                //with lighting, type 1
+                vec4 texcolor=vec4(colorOut,1.0)*texture2D(uSampler, vTextureCoord);
+                gl_FragColor=vec4(texcolor.rgb,texcolor.a);
+            }
+            if(lighting==2.0)
+            {
+                //with lighting, type 2
+                vec4 texcolor=vec4(colorOut,alpha)*texture2D(uSampler, vTextureCoord);
+                gl_FragColor=vec4(texcolor.rgb,texcolor.a);
             }
             else
-            {
+            {   //no lighting
                 vec4 texcolor = texture2D(uSampler, vTextureCoord);
-                gl_FragColor  = vec4(texcolor.rgb,texcolor.a*alpha); 
+                gl_FragColor  = texcolor; 
             }
         }
     `;
@@ -698,6 +713,96 @@ function setupShaders() {
 // render the loaded model
 function renderModels() {
     
+    
+    //ADDING
+    function rendertriangle(whichTriSet) 
+    {
+        currSet = inputTriangles[whichTriSet];
+
+        // make model transform, add to view project
+        makeModelTransform(currSet);
+        mat4.multiply(pvmMatrix, pvMatrix, mMatrix); // project * view * model
+        gl.uniformMatrix4fv(mMatrixULoc, false, mMatrix); // pass in the m matrix
+        gl.uniformMatrix4fv(pvmMatrixULoc, false, pvmMatrix); // pass in the hpvm matrix
+
+        // reflectivity: feed to the fragment shader
+        gl.uniform3fv(ambientULoc, currSet.material.ambient); // pass in the ambient reflectivity
+        gl.uniform3fv(diffuseULoc, currSet.material.diffuse); // pass in the diffuse reflectivity
+        gl.uniform3fv(specularULoc, currSet.material.specular); // pass in the specular reflectivity
+        gl.uniform1f(shininessULoc, currSet.material.n); // pass in the specular exponent
+        gl.uniform1f(lightingULoc, lighting);
+        gl.uniform1f(alphaULoc, currSet.material.alpha); //transparency
+        // vertex buffer: activate and feed into vertex shader
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffers[whichTriSet]); // activate
+        gl.vertexAttribPointer(vPosAttribLoc, 3, gl.FLOAT, false, 0, 0); // feed
+        gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffers[whichTriSet]); // activate
+        gl.vertexAttribPointer(vNormAttribLoc, 3, gl.FLOAT, false, 0, 0); // feed
+        //textures
+        gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffers[whichTriSet]); // activate
+        gl.vertexAttribPointer(vuvAttribLoc, 2, gl.FLOAT, false, 0, 0); // feed
+
+        //referred from https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Tutorial/Using_textures_in_WebGL
+        // Tell WebGL we want to affect texture unit 0
+        gl.activeTexture(gl.TEXTURE0);
+
+        //load Texture 
+        //texture = loadTexture(gl, "https://ncsucgclass.github.io/prog3/tree.png")
+        //console.log(texture);
+        // Bind the texture to texture unit 0
+        texture = textureListTri[whichTriSet];
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+
+        // Tell the shader we bound the texture to texture unit 0
+        gl.uniform1i(samplerUniform, 0);
+        //end referral 
+        // triangle buffer: activate and render
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleBuffers[whichTriSet]); // activate
+        gl.drawElements(gl.TRIANGLES, 3 * triSetSizes[whichTriSet], gl.UNSIGNED_SHORT, 0); // render
+
+    }
+    function renderellipsoid(whichEllipsoid) {
+        ellipsoid = inputEllipsoids[whichEllipsoid];
+
+        // define model transform, premult with pvmMatrix, feed to vertex shader
+        makeModelTransform(ellipsoid);
+        pvmMatrix = mat4.multiply(pvmMatrix, pvMatrix, mMatrix); // premultiply with pv matrix
+        gl.uniformMatrix4fv(mMatrixULoc, false, mMatrix); // pass in model matrix
+        gl.uniformMatrix4fv(pvmMatrixULoc, false, pvmMatrix); // pass in project view model matrix
+
+        // reflectivity: feed to the fragment shader
+        gl.uniform3fv(ambientULoc, ellipsoid.ambient); // pass in the ambient reflectivity
+        gl.uniform3fv(diffuseULoc, ellipsoid.diffuse); // pass in the diffuse reflectivity
+        gl.uniform3fv(specularULoc, ellipsoid.specular); // pass in the specular reflectivity
+        gl.uniform1f(shininessULoc, ellipsoid.n); // pass in the specular exponent
+        gl.uniform1f(lightingULoc, lighting);
+        gl.uniform1f(alphaULoc, ellipsoid.alpha); //transparency
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffers[numTriangleSets + whichEllipsoid]); // activate vertex buffer
+        gl.vertexAttribPointer(vPosAttribLoc, 3, gl.FLOAT, false, 0, 0); // feed vertex buffer to shader
+        gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffers[numTriangleSets + whichEllipsoid]); // activate normal buffer
+        gl.vertexAttribPointer(vNormAttribLoc, 3, gl.FLOAT, false, 0, 0); // feed normal buffer to shader
+        //textures
+        gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffers[numTriangleSets + whichEllipsoid]); // activate
+        gl.vertexAttribPointer(vuvAttribLoc, 2, gl.FLOAT, false, 0, 0); // feed
+
+        // Tell WebGL we want to affect texture unit 0
+        gl.activeTexture(gl.TEXTURE0);
+
+        //load Texture 
+        //var texture1 = loadTexture(gl, "abe.jpg")
+        texture1 = textureListEllipsoid[whichEllipsoid];
+        // Bind the texture to texture unit 0
+        gl.bindTexture(gl.TEXTURE_2D, texture1);
+
+        // Tell the shader we bound the texture to texture unit 0
+        gl.uniform1i(samplerUniform, 0);
+        //end referral 
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleBuffers[numTriangleSets + whichEllipsoid]); // activate tri buffer
+
+        // draw a transformed instance of the ellipsoid
+        gl.drawElements(gl.TRIANGLES, triSetSizes[numTriangleSets + whichEllipsoid], gl.UNSIGNED_SHORT, 0); // render
+    }
+    //END ADDING
+    
     // construct the model transform matrix, based on model state
     function makeModelTransform(currModel) 
     {
@@ -745,6 +850,56 @@ function renderModels() {
     mat4.multiply(pvMatrix,pvMatrix,pMatrix); // projection
     mat4.multiply(pvMatrix,pvMatrix,vMatrix); // projection * view
 
+    var to_sort_list=[];
+    var sorted_indices=[];
+    //Part3 Opaque before Transparent
+  /*
+    to_sort_list = depth_model;
+    sorted_indices=depthsort(depth_model);
+    for(var j in to_sort_list)
+    {   
+        if(to_sort_list[j][3]==1) //opaque
+        gl.depthMask(true);
+        gl.enable(gl.DEPTH_TEST);
+        if (to_sort_list[j][1] == 1) 
+        {
+            renderellipsoid(to_sort_list[j][0] - numTriangleSets);
+        }
+        else 
+        {
+            rendertriangle(to_sort_list[j][0]);
+        }
+    }
+*/
+    //Part4
+    //Depth Sorting the models
+    to_sort_list=depth_model;
+    sorted_indices= depthsort(depth_model); //contains index and info on tri/ellipsoid model
+   //we want the sorted list to contain the indices of all models sorted my 
+   
+   
+   //ADDING 
+   for (var j in sorted_indices) 
+    {
+        if(sorted_indices[j][1]==1)
+            {
+                //console.log("ellipsoid")
+                gl.depthMask(false);
+                gl.disable(gl.DEPTH_TEST);
+                renderellipsoid(sorted_indices[j][0]-numTriangleSets);
+            }
+        else
+        {
+            gl.depthMask(false);
+            gl.disable(gl.DEPTH_TEST);
+            //console.log("triangle")
+            rendertriangle(sorted_indices[j][0]);
+        }
+    }
+    /*
+    //END ADDING
+    //Disable Depth Test
+    gl.disable(gl.DEPTH_TEST);
     // render each triangle set
     var currSet; // the tri set and its material properties
     for (var whichTriSet=0; whichTriSet<numTriangleSets; whichTriSet++) 
@@ -838,8 +993,26 @@ function renderModels() {
         // draw a transformed instance of the ellipsoid
         gl.drawElements(gl.TRIANGLES,triSetSizes[numTriangleSets+whichEllipsoid],gl.UNSIGNED_SHORT,0); // render
     } // end for each ellipsoid
+    */
 } // end render model
 
+
+function depthsort(depth_model)
+{
+    //referred from https://stackoverflow.com/questions/3730510/javascript-sort-array-and-return-an-array-of-indicies-that-indicates-the-positi
+    var depth_values=depth_model;
+    depth_values.sort(function(l,r) {
+        return l[0]>r[0] ? -1:1;
+    });
+    var indices=[];
+    var sorted_by_depth=[];
+    for (var j in depth_values)
+    {
+        sorted_by_depth.push(depth_values[j][0]);
+        indices.push([depth_values[j][1],depth_values[j][2]]);
+    }
+    return indices;
+}
 function isPowerOf2(value) {
     return (value & (value - 1)) == 0;
 }
