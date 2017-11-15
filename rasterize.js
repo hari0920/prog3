@@ -32,6 +32,8 @@ var textureListTri = [];
 var textureListEllipsoid = [];
 var temptex;
 var depth_model = [];
+var to_sort_list = [];
+var sorted_indices = [];
 /* shader parameter locations */
 var vPosAttribLoc; // where to put position for vertex shader
 var mMatrixULoc; // where to put model matrix for vertex shader
@@ -241,7 +243,7 @@ function handleKeyDown(event) {
             break;
         //Texture Blending
         case "KeyB":
-        console.log(lighting);
+        //console.log(lighting);
             if(lighting==2.0)
                 lighting=0.0;
             else
@@ -279,7 +281,7 @@ function setupWebGL() {
          //gl.clearColor(0.0, 0.0, 0.0, 1.0); // use black when we clear the frame buffer
          gl.clearDepth(1.0); // use max when we clear the depth buffer
          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-         gl.enable(gl.BLEND);
+         //gl.enable(gl.BLEND);
          gl.enable(gl.DEPTH_TEST); // use hidden surface removal (with zbuffering)
        }
      } // end try
@@ -535,6 +537,33 @@ function loadModels() {
                 viewDelta = vec3.length(vec3.subtract(temp,maxCorner,minCorner)) / 100; // set global
             } // end if ellipsoid file loaded
         } // end if triangle file loaded
+
+        
+        //Part3 Opaque before Transparent
+        //we need to draw opaque first, then transparent.
+          to_sort_list = depth_model; // has depth value,index, type, alpha 
+          console.log(to_sort_list[1])
+          sorted_indices=depthsort(depth_model);
+          for(var j in to_sort_list)
+          {   
+              if(to_sort_list[j][3]==1) //opaque
+              gl.depthMask(true);
+              gl.enable(gl.DEPTH_TEST);
+              if (to_sort_list[j][1] == 1) 
+              {
+                  renderellipsoid(to_sort_list[j][0] - numTriangleSets);
+              }
+              else 
+              {
+                  rendertriangle(to_sort_list[j][0]);
+              }
+          }
+        //Part4
+        //Depth Sorting the models
+        //to_sort_list = depth_model;
+        //sorted_indices = depthsort(depth_model); //contains index and info on tri/ellipsoid model
+   //we want the sorted list to contain the indices of all models sorted my 
+
     } // end try 
     
     catch(e) {
@@ -628,18 +657,19 @@ function setupShaders() {
             
             if(lighting==1.0)
             {
-                //with lighting, type 1
-                vec4 texcolor=vec4(colorOut,1.0)*texture2D(uSampler, vTextureCoord);
-                gl_FragColor=vec4(texcolor.rgb,texcolor.a);
+                //with lighting, type 1 mult color, keep tex alpha
+                vec4 texcolor=texture2D(uSampler, vTextureCoord);
+                vec3 totalcolor=colorOut*texcolor.rgb;
+                gl_FragColor=vec4(totalcolor,texcolor.a);
             }
-            if(lighting==2.0)
+            else if(lighting==2.0)
             {
-                //with lighting, type 2
+                //with lighting, type 2 mult color and alpha
                 vec4 texcolor=vec4(colorOut,alpha)*texture2D(uSampler, vTextureCoord);
                 gl_FragColor=vec4(texcolor.rgb,texcolor.a);
             }
             else
-            {   //no lighting
+            {   //no lighting tex col and tex alpha
                 vec4 texcolor = texture2D(uSampler, vTextureCoord);
                 gl_FragColor  = texcolor; 
             }
@@ -849,57 +879,6 @@ function renderModels() {
     mat4.lookAt(vMatrix,Eye,Center,Up); // create view matrix
     mat4.multiply(pvMatrix,pvMatrix,pMatrix); // projection
     mat4.multiply(pvMatrix,pvMatrix,vMatrix); // projection * view
-
-    var to_sort_list=[];
-    var sorted_indices=[];
-    //Part3 Opaque before Transparent
-  /*
-    to_sort_list = depth_model;
-    sorted_indices=depthsort(depth_model);
-    for(var j in to_sort_list)
-    {   
-        if(to_sort_list[j][3]==1) //opaque
-        gl.depthMask(true);
-        gl.enable(gl.DEPTH_TEST);
-        if (to_sort_list[j][1] == 1) 
-        {
-            renderellipsoid(to_sort_list[j][0] - numTriangleSets);
-        }
-        else 
-        {
-            rendertriangle(to_sort_list[j][0]);
-        }
-    }
-*/
-    //Part4
-    //Depth Sorting the models
-    to_sort_list=depth_model;
-    sorted_indices= depthsort(depth_model); //contains index and info on tri/ellipsoid model
-   //we want the sorted list to contain the indices of all models sorted my 
-   
-   
-   //ADDING 
-   for (var j in sorted_indices) 
-    {
-        if(sorted_indices[j][1]==1)
-            {
-                //console.log("ellipsoid")
-                gl.depthMask(false);
-                gl.disable(gl.DEPTH_TEST);
-                renderellipsoid(sorted_indices[j][0]-numTriangleSets);
-            }
-        else
-        {
-            gl.depthMask(false);
-            gl.disable(gl.DEPTH_TEST);
-            //console.log("triangle")
-            rendertriangle(sorted_indices[j][0]);
-        }
-    }
-    /*
-    //END ADDING
-    //Disable Depth Test
-    gl.disable(gl.DEPTH_TEST);
     // render each triangle set
     var currSet; // the tri set and its material properties
     for (var whichTriSet=0; whichTriSet<numTriangleSets; whichTriSet++) 
@@ -993,9 +972,24 @@ function renderModels() {
         // draw a transformed instance of the ellipsoid
         gl.drawElements(gl.TRIANGLES,triSetSizes[numTriangleSets+whichEllipsoid],gl.UNSIGNED_SHORT,0); // render
     } // end for each ellipsoid
-    */
+    
 } // end render model
 
+
+function opacitysort(depth_model) {
+    //referred from https://stackoverflow.com/questions/3730510/javascript-sort-array-and-return-an-array-of-indicies-that-indicates-the-positi
+    var depth_values = depth_model;
+    depth_values.sort(function (l, r) {
+        return l[0] > r[0] ? -1 : 1;
+    });
+    var indices = [];
+    var sorted_by_depth = [];
+    for (var j in depth_values) {
+        sorted_by_depth.push(depth_values[j][0]);
+        indices.push([depth_values[j][1], depth_values[j][2]]);
+    }
+    return indices;
+}
 
 function depthsort(depth_model)
 {
