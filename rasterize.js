@@ -933,7 +933,7 @@ function renderModels()
     //first draw the opaque one.
     for (var j in sorted_by_depth)
     {
-            console.log(sorted_by_depth[j][3]);
+        //console.log(sorted_by_depth[j][3]);
            if (sorted_by_depth[j][3] == 1) //opaque
             {
                 //gl.disable(gl.BLEND); 
