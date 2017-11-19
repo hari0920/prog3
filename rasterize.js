@@ -34,6 +34,8 @@ var temptex;
 var depth_model = [];
 var to_sort_list = [];
 var sorted_indices = [];
+var sorted_by_alpha=[];
+var sorted_by_depth_final = [];
 /* shader parameter locations */
 var vPosAttribLoc; // where to put position for vertex shader
 var mMatrixULoc; // where to put model matrix for vertex shader
@@ -281,9 +283,10 @@ function setupWebGL() {
          //gl.clearColor(0.0, 0.0, 0.0, 1.0); // use black when we clear the frame buffer
          gl.clearDepth(1.0); // use max when we clear the depth buffer
          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-         //gl.enable(gl.BLEND);
+         gl.enable(gl.BLEND);
          gl.enable(gl.DEPTH_TEST); // use hidden surface removal (with zbuffering)
-       }
+        //gl.disable(gl.DEPTH_TEST);
+        }
      } // end try
      
      catch(e) {
@@ -542,27 +545,21 @@ function loadModels() {
         //Part3 Opaque before Transparent
         //we need to draw opaque first, then transparent.
           to_sort_list = depth_model; // has depth value,index, type, alpha 
-          console.log(to_sort_list[1])
-          sorted_indices=depthsort(depth_model);
-          for(var j in to_sort_list)
-          {   
-              if(to_sort_list[j][3]==1) //opaque
-              gl.depthMask(true);
-              gl.enable(gl.DEPTH_TEST);
-              if (to_sort_list[j][1] == 1) 
-              {
-                  renderellipsoid(to_sort_list[j][0] - numTriangleSets);
-              }
-              else 
-              {
-                  rendertriangle(to_sort_list[j][0]);
-              }
+          //console.log(to_sort_list[1])
+          //we need to sort based on alpha, in descending order.
+          var alpha_model=[];
+          for(var j in depth_model)
+          { 
+              alpha_model.push([depth_model[j][3], depth_model[j][1], depth_model[j][2]]); //alpha,index,type
+
           }
-        //Part4
-        //Depth Sorting the models
-        //to_sort_list = depth_model;
-        //sorted_indices = depthsort(depth_model); //contains index and info on tri/ellipsoid model
-   //we want the sorted list to contain the indices of all models sorted my 
+          sorted_indices=opacitysort(alpha_model); //returns index and type sorted by alpha
+          sorted_by_alpha=sorted_indices; 
+
+          //part 4 depth sort
+        //we need to sort based on alpha, in descending order.
+       // sorted_indices = depthsort(depth_model); //returns index and type sorted by alpha
+        //sorted_by_depth_final = sorted_indices; 
 
     } // end try 
     
@@ -741,9 +738,11 @@ function setupShaders() {
 } // end setup shaders
 
 // render the loaded model
-function renderModels() {
+function renderModels() 
+{
+
     
-    
+
     //ADDING
     function rendertriangle(whichTriSet) 
     {
@@ -752,6 +751,8 @@ function renderModels() {
         // make model transform, add to view project
         makeModelTransform(currSet);
         mat4.multiply(pvmMatrix, pvMatrix, mMatrix); // project * view * model
+        //console.log(pvmMatrix[15]); // z-coordinate of the model
+        //depth_viewz.push([pvmMatrix[15],0]);
         gl.uniformMatrix4fv(mMatrixULoc, false, mMatrix); // pass in the m matrix
         gl.uniformMatrix4fv(pvmMatrixULoc, false, pvmMatrix); // pass in the hpvm matrix
 
@@ -790,12 +791,14 @@ function renderModels() {
         gl.drawElements(gl.TRIANGLES, 3 * triSetSizes[whichTriSet], gl.UNSIGNED_SHORT, 0); // render
 
     }
-    function renderellipsoid(whichEllipsoid) {
+    function renderellipsoid(whichEllipsoid) 
+    {
         ellipsoid = inputEllipsoids[whichEllipsoid];
 
         // define model transform, premult with pvmMatrix, feed to vertex shader
         makeModelTransform(ellipsoid);
         pvmMatrix = mat4.multiply(pvmMatrix, pvMatrix, mMatrix); // premultiply with pv matrix
+        //depth_viewz.push([pvmMatrix[15], 1]);
         gl.uniformMatrix4fv(mMatrixULoc, false, mMatrix); // pass in model matrix
         gl.uniformMatrix4fv(pvmMatrixULoc, false, pvmMatrix); // pass in project view model matrix
 
@@ -832,37 +835,38 @@ function renderModels() {
         gl.drawElements(gl.TRIANGLES, triSetSizes[numTriangleSets + whichEllipsoid], gl.UNSIGNED_SHORT, 0); // render
     }
     //END ADDING
-    
     // construct the model transform matrix, based on model state
-    function makeModelTransform(currModel) 
-    {
+    function makeModelTransform(currModel) {
         var zAxis = vec3.create(), sumRotation = mat4.create(), temp = mat4.create(), negCtr = vec3.create();
 
         // move the model to the origin
-        mat4.fromTranslation(mMatrix,vec3.negate(negCtr,currModel.center)); 
-        
+        mat4.fromTranslation(mMatrix, vec3.negate(negCtr, currModel.center));
+
         // scale for highlighting if needed
         if (currModel.on)
-            mat4.multiply(mMatrix,mat4.fromScaling(temp,vec3.fromValues(1.2,1.2,1.2)),mMatrix); // S(1.2) * T(-ctr)
-        
+            mat4.multiply(mMatrix, mat4.fromScaling(temp, vec3.fromValues(1.2, 1.2, 1.2)), mMatrix); // S(1.2) * T(-ctr)
+
         // rotate the model to current interactive orientation
-        vec3.normalize(zAxis,vec3.cross(zAxis,currModel.xAxis,currModel.yAxis)); // get the new model z axis
+        vec3.normalize(zAxis, vec3.cross(zAxis, currModel.xAxis, currModel.yAxis)); // get the new model z axis
+        //currModel.depth=zAxis[2]; //view-z depth of current model  
         mat4.set(sumRotation, // get the composite rotation
             currModel.xAxis[0], currModel.yAxis[0], zAxis[0], 0,
             currModel.xAxis[1], currModel.yAxis[1], zAxis[1], 0,
             currModel.xAxis[2], currModel.yAxis[2], zAxis[2], 0,
-            0, 0,  0, 1);
-        mat4.multiply(mMatrix,sumRotation,mMatrix); // R(ax) * S(1.2) * T(-ctr)
-        
+            0, 0, 0, 1);
+        mat4.multiply(mMatrix, sumRotation, mMatrix); // R(ax) * S(1.2) * T(-ctr)
+
         // translate back to model center
-        mat4.multiply(mMatrix,mat4.fromTranslation(temp,currModel.center),mMatrix); // T(ctr) * R(ax) * S(1.2) * T(-ctr)
+        mat4.multiply(mMatrix, mat4.fromTranslation(temp, currModel.center), mMatrix); // T(ctr) * R(ax) * S(1.2) * T(-ctr)
 
         // translate model to current interactive orientation
-        mat4.multiply(mMatrix,mat4.fromTranslation(temp,currModel.translation),mMatrix); // T(pos)*T(ctr)*R(ax)*S(1.2)*T(-ctr)
-        
+        mat4.multiply(mMatrix, mat4.fromTranslation(temp, currModel.translation), mMatrix); // T(pos)*T(ctr)*R(ax)*S(1.2)*T(-ctr)
+        //depth_viewz.push([zAxis[2],currModel]);
+
     } // end make model transform
     
     // var hMatrix = mat4.create(); // handedness matrix
+    var depth_viewz = [];
     var pMatrix = mat4.create(); // projection matrix
     var vMatrix = mat4.create(); // view matrix
     var mMatrix = mat4.create(); // model matrix
@@ -879,6 +883,144 @@ function renderModels() {
     mat4.lookAt(vMatrix,Eye,Center,Up); // create view matrix
     mat4.multiply(pvMatrix,pvMatrix,pMatrix); // projection
     mat4.multiply(pvMatrix,pvMatrix,vMatrix); // projection * view
+    
+//Part 4
+/*
+    for (var j in sorted_by_depth_final) 
+    {
+            //console.log(sorted_by_depth_final[j][0]);
+            //gl.disable(gl.BLEND); 
+            //gl.enable(gl.DEPTH_TEST);
+            //gl.depthMask(true);
+            if (sorted_by_depth_final[j][1] == 1) //ellipsoid 
+            {
+                console.log(sorted_by_depth_final[j][0] - numTriangleSets);
+                renderellipsoid(sorted_by_depth_final[j][0] - numTriangleSets);
+            }
+            else 
+            {
+                rendertriangle(sorted_by_depth_final[j][0]);
+            }
+        
+    }
+    */
+    //Make Model Transforms for all the models first, then obtain the view Z.
+    //Then sort by viewZ, then render them in that order.
+    var currSet; // the tri set and its material properties
+    for (var whichTriSet = 0; whichTriSet < numTriangleSets; whichTriSet++) 
+    {
+        currSet = inputTriangles[whichTriSet];
+        // make model transform, add to view project
+        makeModelTransform(currSet);
+        mat4.multiply(pvmMatrix, pvMatrix, mMatrix); // project * view * model
+        depth_viewz.push([pvmMatrix[15], 0,whichTriSet,currSet.material.alpha]); //for triangle
+    }
+    var ellipsoid, instanceTransform = mat4.create(); // the current ellipsoid and material
+
+    for (var whichEllipsoid = 0; whichEllipsoid < numEllipsoids; whichEllipsoid++) 
+    {
+        ellipsoid = inputEllipsoids[whichEllipsoid];
+
+        // define model transform, premult with pvmMatrix, feed to vertex shader
+        makeModelTransform(ellipsoid);
+        pvmMatrix = mat4.multiply(pvmMatrix, pvMatrix, mMatrix); // premultiply with pv matrix
+        depth_viewz.push([pvmMatrix[15], 1,whichEllipsoid,ellipsoid.alpha]); //for ellipsoid
+    }
+
+    //console.log(depth_viewz[0]);
+    sorted_indices = depthsort(depth_viewz); //returns index and type sorted by alpha
+    var sorted_by_depth = sorted_indices; 
+    //first draw the opaque one.
+    for (var j in sorted_by_depth)
+    {
+            console.log(sorted_by_depth[j][3]);
+           if (sorted_by_depth[j][3] == 1) //opaque
+            {
+                //gl.disable(gl.BLEND); 
+                gl.enable(gl.DEPTH_TEST);
+                gl.depthMask(true);
+                if (sorted_by_depth[j][1] == 1) //ellipsoid 
+                {
+                    renderellipsoid(sorted_by_depth[j][2]);
+                }
+                else 
+                {
+                    rendertriangle(sorted_by_depth[j][2]);
+                }
+             sorted_by_depth.splice(j,1);   
+            }
+
+    } //opaque rendered
+    //now draw rest
+
+    for (var j in sorted_by_depth) 
+    {
+        // console.log(sorted_by_depth[j][0]);
+        gl.depthMask(false);
+        if(sorted_by_depth[j]!=[])
+        {
+            if (sorted_by_depth[j][1] == 1) //ellipsoid 
+            {
+                renderellipsoid(sorted_by_depth[j][2]);
+            }
+            else
+            {
+                rendertriangle(sorted_by_depth[j][2]);
+            }
+        }
+    } //end part 3
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+    for (var j in sorted_by_alpha) 
+    {
+       // console.log(sorted_by_alpha[j][0]);
+        if (sorted_by_alpha[j][0] == 1) //opaque
+        {
+            //gl.disable(gl.BLEND); 
+            //gl.enable(gl.DEPTH_TEST);
+            //gl.depthMask(true);
+            if (sorted_by_alpha[j][2] == 1) //ellipsoid 
+            {
+                renderellipsoid(sorted_by_alpha[j][1] - numTriangleSets);
+            }
+            else {
+                rendertriangle(sorted_by_alpha[j][1]);
+            }
+        }
+        else //transparent
+        {
+            //gl.enable(gl.BLEND); 
+            //gl.enable(gl.DEPTH_TEST);
+            //gl.disable(gl.DEPTH_TEST)
+            gl.depthMask(false);
+            if (sorted_by_alpha[j][2] == 1) //ellipsoid 
+            {
+                renderellipsoid(sorted_by_alpha[j][1] - numTriangleSets);
+            }
+            else 
+            {
+                rendertriangle(sorted_by_alpha[j][1]);
+            }
+
+        }
+    
+    } //end part 3
+  */  
+    /*
     // render each triangle set
     var currSet; // the tri set and its material properties
     for (var whichTriSet=0; whichTriSet<numTriangleSets; whichTriSet++) 
@@ -972,38 +1114,39 @@ function renderModels() {
         // draw a transformed instance of the ellipsoid
         gl.drawElements(gl.TRIANGLES,triSetSizes[numTriangleSets+whichEllipsoid],gl.UNSIGNED_SHORT,0); // render
     } // end for each ellipsoid
-    
+    */
 } // end render model
 
 
-function opacitysort(depth_model) {
+function opacitysort(alpha_model) {
     //referred from https://stackoverflow.com/questions/3730510/javascript-sort-array-and-return-an-array-of-indicies-that-indicates-the-positi
-    var depth_values = depth_model;
-    depth_values.sort(function (l, r) {
+    var alpha_values = alpha_model;
+    alpha_values.sort(function (l, r) {
         return l[0] > r[0] ? -1 : 1;
     });
     var indices = [];
-    var sorted_by_depth = [];
-    for (var j in depth_values) {
-        sorted_by_depth.push(depth_values[j][0]);
-        indices.push([depth_values[j][1], depth_values[j][2]]);
+    //var sorted_by_depth = [];
+    for (var j in alpha_values) {
+        //sorted_by_depth.push(alpha_values[j][0]);
+        indices.push([alpha_values[j][0], alpha_values[j][1], alpha_values[j][2]]);
     }
-    return indices;
+    return indices; //return based on alpha values
 }
 
 function depthsort(depth_model)
 {
+    //input: depth and type
     //referred from https://stackoverflow.com/questions/3730510/javascript-sort-array-and-return-an-array-of-indicies-that-indicates-the-positi
     var depth_values=depth_model;
     depth_values.sort(function(l,r) {
         return l[0]>r[0] ? -1:1;
     });
     var indices=[];
-    var sorted_by_depth=[];
+   // var sorted_by_depth=[];
     for (var j in depth_values)
     {
-        sorted_by_depth.push(depth_values[j][0]);
-        indices.push([depth_values[j][1],depth_values[j][2]]);
+     //   sorted_by_depth.push(depth_values[j][0]);
+        indices.push([depth_values[j][0], depth_values[j][1], depth_values[j][2], depth_values[j][3]]);
     }
     return indices;
 }
